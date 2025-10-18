@@ -1,1 +1,0 @@
-"""WonderDash package init."""

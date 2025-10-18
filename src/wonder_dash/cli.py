@@ -37,6 +37,12 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
     run_dashboard(config)
 
 
+def cmd_hub(args: argparse.Namespace) -> None:
+    from .hub import launch_hub
+
+    launch_hub()
+
+
 def cmd_show_config(args: argparse.Namespace) -> None:
     try:
         config = load_config()
@@ -97,6 +103,9 @@ def build_parser() -> argparse.ArgumentParser:
     dash_parser = subparsers.add_parser("dashboard", help="Launch the terminal dashboard.")
     dash_parser.set_defaults(func=cmd_dashboard)
 
+    hub_parser = subparsers.add_parser("hub", help="Launch the WonderDash hub menu.")
+    hub_parser.set_defaults(func=cmd_hub)
+
     show_parser = subparsers.add_parser("show-config", help="Display current configuration.")
     show_parser.set_defaults(func=cmd_show_config)
 
@@ -111,8 +120,10 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if not hasattr(args, "func") or args.func is None:
-        parser.print_help()
-        return 1
+        from .hub import launch_hub
+
+        launch_hub()
+        return 0
 
     args.func(args)
     return 0

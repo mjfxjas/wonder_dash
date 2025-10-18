@@ -9,7 +9,8 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from statistics import fmean
+from typing import Dict, List, Optional
 
 from .config import WonderConfig
 
@@ -66,6 +67,30 @@ class MetricWindow:
     messages: List[str]
 
 
+@dataclass(frozen=True)
+class ScalarMetric:
+    label: str
+    unit: str
+    values: List[float]
+    timestamps: List[datetime]
+
+    @property
+    def latest(self) -> float:
+        return self.values[-1] if self.values else 0.0
+
+    @property
+    def total(self) -> float:
+        return sum(self.values)
+
+
+@dataclass(frozen=True)
+class HealthStatus:
+    label: str
+    detail: str
+    style: str
+    badge: str
+
+
 def _session_from_config(config: WonderConfig) -> boto3.Session:
     kwargs = {}
     if config.aws_profile:
@@ -111,29 +136,87 @@ def fetch_request_series(
     distribution_id: str,
     period_seconds: int,
     window_minutes: int,
+    *,
+    scalars: Optional[Dict[str, ScalarMetric]] = None,
 ) -> MetricWindow:
     end = datetime.now(timezone.utc) - timedelta(seconds=period_seconds)
     start = end - timedelta(minutes=window_minutes)
 
-    response = client.get_metric_data(
-        MetricDataQueries=[
+    metric_specs = {
+        "requests": {"metric": "Requests", "stat": "Sum", "unit": "Count", "label": "Requests"},
+        "bytes_downloaded": {
+            "metric": "BytesDownloaded",
+            "stat": "Sum",
+            "unit": "Bytes",
+            "label": "Bytes Downloaded",
+        },
+        "bytes_uploaded": {
+            "metric": "BytesUploaded",
+            "stat": "Sum",
+            "unit": "Bytes",
+            "label": "Bytes Uploaded",
+        },
+        "errors_4xx": {
+            "metric": "4xxErrorRate",
+            "stat": "Average",
+            "unit": "Percent",
+            "label": "4xx Error Rate",
+        },
+        "errors_5xx": {
+            "metric": "5xxErrorRate",
+            "stat": "Average",
+            "unit": "Percent",
+            "label": "5xx Error Rate",
+        },
+        "total_errors": {
+            "metric": "TotalErrorRate",
+            "stat": "Average",
+            "unit": "Percent",
+            "label": "Total Error Rate",
+        },
+        "origin_latency": {
+            "metric": "OriginLatency",
+            "stat": "Average",
+            "unit": "Milliseconds",
+            "label": "Origin Latency",
+        },
+        "availability": {
+            "metric": "Availability",
+            "stat": "Average",
+            "unit": "Percent",
+            "label": "Availability",
+        },
+        "cache_hit": {
+            "metric": "CacheHitRate",
+            "stat": "Average",
+            "unit": "Percent",
+            "label": "Cache Hit Rate",
+        },
+    }
+
+    queries = []
+    for key, spec in metric_specs.items():
+        queries.append(
             {
-                "Id": "requests",
+                "Id": key,
                 "MetricStat": {
                     "Metric": {
                         "Namespace": "AWS/CloudFront",
-                        "MetricName": "Requests",
+                        "MetricName": spec["metric"],
                         "Dimensions": [
                             {"Name": "DistributionId", "Value": distribution_id},
                             {"Name": "Region", "Value": "Global"},
                         ],
                     },
                     "Period": period_seconds,
-                    "Stat": "Sum",
+                    "Stat": spec["stat"],
                 },
                 "ReturnData": True,
             }
-        ],
+        )
+
+    response = client.get_metric_data(
+        MetricDataQueries=queries,
         StartTime=start,
         EndTime=end,
         ScanBy="TimestampAscending",
@@ -142,29 +225,48 @@ def fetch_request_series(
 
     results = response.get("MetricDataResults", [])
     if not results:
+        if scalars is not None:
+            scalars.clear()
         return MetricWindow(samples=[], status="NoData", messages=[])
 
-    result = results[0]
-    timestamps = result.get("Timestamps", [])
-    values = result.get("Values", [])
-    status = result.get("StatusCode", "Unknown")
-
-    raw_messages = result.get("Messages") or []
-    messages: List[str] = []
-    for entry in raw_messages:
-        if isinstance(entry, dict):
-            code = entry.get("Code") or "Message"
-            value = entry.get("Value") or ""
-            messages.append(f"{code}: {value}".strip())
-        else:
-            messages.append(str(entry))
-
     samples: List[MetricSample] = []
-    for ts, value in zip(timestamps, values):
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        samples.append(MetricSample(timestamp=ts, value=float(value)))
+    scalar_store: Dict[str, ScalarMetric] = {}
+    status = "Unknown"
+    messages: List[str] = []
+
+    for result in results:
+        metric_id = result.get("Id", "")
+        timestamps = [
+            datetime.fromisoformat(ts.replace("Z", "+00:00")) if isinstance(ts, str) else ts
+            for ts in result.get("Timestamps", [])
+        ]
+        values = [float(v) for v in result.get("Values", [])]
+        status = result.get("StatusCode", status)
+
+        for entry in result.get("Messages") or []:
+            if isinstance(entry, dict):
+                code = entry.get("Code") or "Message"
+                value = entry.get("Value") or ""
+                messages.append(f"{code}: {value}".strip())
+            else:
+                messages.append(str(entry))
+
+        if metric_id == "requests":
+            samples.extend(MetricSample(timestamp=ts, value=val) for ts, val in zip(timestamps, values))
+        else:
+            spec = metric_specs.get(metric_id)
+            if spec:
+                scalar_store[metric_id] = ScalarMetric(
+                    label=spec.get("label", metric_id.replace("_", " ").title()),
+                    unit=spec["unit"],
+                    values=values,
+                    timestamps=timestamps,
+                )
+
     samples.sort(key=lambda sample: sample.timestamp)
+    if scalars is not None:
+        scalars.clear()
+        scalars.update(scalar_store)
     return MetricWindow(samples=samples, status=status, messages=messages)
 
 
@@ -174,10 +276,15 @@ def build_layout(
     last_refresh: Optional[datetime],
     poll_seconds: int,
     remaining_seconds: Optional[float] = None,
+    *,
+    header: Panel,
+    scalars: Optional[Dict[str, ScalarMetric]] = None,
 ) -> Layout:
     samples = list(window.samples)
     overview_panel = _overview_panel(samples, period_seconds)
     history_panel = _history_panel(samples)
+    metrics_panel = _metrics_panel(scalars or {})
+    recent_panel = _recent_panel(samples)
     status_lines = [f"Metric status: {window.status or 'Unknown'}"]
     if not samples and window.status not in {"CloudWatchError", "CredentialsMissing"}:
         status_lines.append(
@@ -202,8 +309,11 @@ def build_layout(
 
     layout = Layout(name="root")
     layout.split_column(
-        Layout(overview_panel, name="summary", size=12),
+        Layout(header, name="header", size=5),
+        Layout(overview_panel, name="summary", size=10),
+        Layout(recent_panel, name="recent", size=7),
         Layout(history_panel, name="history"),
+        Layout(metrics_panel, name="metrics", size=9),
         Layout(status_panel, name="status", size=7),
     )
     return layout
@@ -240,6 +350,60 @@ def _overview_panel(samples: List[MetricSample], period_seconds: int) -> Panel:
     return Panel(table, title="CloudFront Requests", border_style="cyan")
 
 
+def _format_bytes(value: float) -> str:
+    units = ["Bytes", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:,.2f} {unit}"
+        value /= 1024
+    return f"{value:,.2f} Bytes"
+
+
+def _metrics_panel(metrics: Dict[str, ScalarMetric]) -> Panel:
+    table = Table.grid(expand=True)
+    table.add_column(justify="left")
+    table.add_column(justify="right")
+
+    if not metrics:
+        table.add_row("No supporting metrics yet.", "")
+        return Panel(table, title="Additional Metrics", border_style="blue")
+
+    def add_row(label: str, value: str) -> None:
+        table.add_row(label, value)
+
+    groups = [
+        ("Throughput", ["bytes_downloaded", "bytes_uploaded"]),
+        ("Reliability", ["availability", "total_errors", "errors_4xx", "errors_5xx"]),
+        ("Latency", ["origin_latency"]),
+        ("Cache", ["cache_hit"]),
+    ]
+
+    for group, keys in groups:
+        items = [metrics.get(key) for key in keys if metrics.get(key)]
+        if not items:
+            continue
+        add_row(Text(group, style="bold cyan"), "")
+        for metric in items:
+            bullet = "› "
+            if metric.unit == "Bytes":
+                add_row(f"{bullet}{metric.label} (latest)", _format_bytes(metric.latest))
+                add_row("  Window total", _format_bytes(metric.total))
+            elif metric.unit == "Milliseconds":
+                avg = fmean(metric.values) if metric.values else 0.0
+                add_row(f"{bullet}{metric.label}", f"{metric.latest:,.0f} ms")
+                add_row("  Window avg", f"{avg:,.0f} ms")
+            elif metric.unit == "Percent":
+                avg = fmean(metric.values) if metric.values else 0.0
+                add_row(f"{bullet}{metric.label}", f"{metric.latest:,.2f}%")
+                add_row("  Window avg", f"{avg:,.2f}%")
+            else:
+                add_row(f"{bullet}{metric.label}", f"{metric.latest:,.2f}")
+                add_row("  Window total", f"{metric.total:,.2f}")
+        add_row("", "")
+
+    return Panel(table, title="Additional Metrics", border_style="blue")
+
+
 def _history_panel(samples: List[MetricSample]) -> Panel:
     chart = Table(show_header=False, box=None, expand=True, padding=(0, 1))
     chart.add_column("Time", justify="left", no_wrap=True)
@@ -266,6 +430,117 @@ def _history_panel(samples: List[MetricSample]) -> Panel:
         )
 
     return Panel(chart, title="Recent Periods", border_style="magenta")
+
+
+def _recent_panel(samples: List[MetricSample]) -> Panel:
+    table = Table.grid(expand=True)
+    table.add_column(justify="left")
+    table.add_column(justify="right")
+
+    if not samples:
+        table.add_row("Latest", "—")
+        table.add_row("Change", "—")
+        table.add_row("Window avg", "—")
+        return Panel(table, title="Request Snapshots", border_style="green")
+
+    latest = samples[-1].value
+    prev = samples[-2].value if len(samples) > 1 else 0.0
+    change = latest - prev
+    avg = sum(s.value for s in samples) / len(samples)
+
+    if change > 0:
+        change_symbol = "+"
+        change_style = "green"
+    elif change < 0:
+        change_symbol = "-"
+        change_style = "red"
+    else:
+        change_symbol = "="
+        change_style = "yellow"
+    table.add_row("Latest requests", f"{latest:,.0f}")
+    table.add_row("Change", Text(f"{change_symbol}{abs(change):,.0f}", style=change_style))
+    table.add_row("Window avg", f"{avg:,.0f}")
+
+    return Panel(table, title="Request Snapshots", border_style="green")
+
+
+def _compute_health(metrics: Dict[str, ScalarMetric], samples: List[MetricSample]) -> HealthStatus:
+    if not metrics and not samples:
+        return HealthStatus("Monitoring", "Waiting for metrics", "yellow", badge="? Monitoring")
+
+    severity = 0
+    notes: List[str] = []
+
+    availability = metrics.get("availability")
+    if availability and availability.values:
+        latest = availability.latest
+        if latest < 98.0:
+            severity = max(severity, 2)
+            notes.append(f"Availability {latest:,.2f}%")
+        elif latest < 99.5:
+            severity = max(severity, 1)
+            notes.append(f"Availability {latest:,.2f}%")
+
+    errors = metrics.get("total_errors")
+    if errors and errors.values:
+        latest = errors.latest
+        if latest > 5:
+            severity = max(severity, 2)
+            notes.append(f"Errors {latest:,.2f}%")
+        elif latest > 1:
+            severity = max(severity, 1)
+            notes.append(f"Errors {latest:,.2f}%")
+
+    latency = metrics.get("origin_latency")
+    if latency and latency.values:
+        latest = latency.latest
+        if latest > 400:
+            severity = max(severity, 2)
+            notes.append(f"Latency {latest:,.0f}ms")
+        elif latest > 250:
+            severity = max(severity, 1)
+            notes.append(f"Latency {latest:,.0f}ms")
+
+    if severity == 0:
+        label = "Healthy"
+        style = "green"
+        detail = ", ".join(notes) if notes else "All metrics nominal"
+        badge = "[OK]"
+    elif severity == 1:
+        label = "Watch"
+        style = "yellow"
+        detail = ", ".join(notes)
+        badge = "[WARN]"
+    else:
+        label = "Degraded"
+        style = "red"
+        detail = ", ".join(notes) if notes else "Investigate metrics"
+        badge = "[CRIT]"
+
+    return HealthStatus(label, detail, style, badge)
+
+
+def _header_panel(config: WonderConfig, health: HealthStatus, window: MetricWindow) -> Panel:
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1, justify="right")
+
+    grid.add_row(Text(f"{health.badge} {health.label}", style=f"bold {health.style}"), Text(health.detail or ""))
+    grid.add_row(
+        f"Distribution: {config.distribution_id or '—'}",
+        f"Region: {config.region}",
+    )
+    grid.add_row(
+        f"Period: {config.period_seconds}s",
+        f"Window: {config.window_minutes}m",
+    )
+    if window.samples:
+        grid.add_row(
+            f"Last datapoint: {window.samples[-1].timestamp.astimezone(timezone.utc).strftime('%H:%M:%S UTC')}",
+            f"Points: {len(window.samples)}",
+        )
+
+    return Panel(grid, border_style=health.style, title="WonderDash")
 
 
 def _status_panel(
@@ -335,6 +610,9 @@ def _wait_for_next_poll(
     period_seconds: int,
     last_refresh: Optional[datetime],
     poll_seconds: int,
+    *,
+    header: Panel,
+    scalars: Optional[Dict[str, ScalarMetric]] = None,
 ) -> bool:
     deadline = time.monotonic() + poll_seconds
     while True:
@@ -353,6 +631,8 @@ def _wait_for_next_poll(
                 last_refresh,
                 poll_seconds,
                 remaining_seconds=remaining,
+                header=header,
+                scalars=scalars,
             ),
             refresh=True,
         )
@@ -376,6 +656,10 @@ def run_dashboard(config: WonderConfig) -> None:
         messages=[f"Watching distribution {config.distribution_id}"],
     )
     last_refresh: Optional[datetime] = None
+    scalars: Dict[str, ScalarMetric] = {}
+
+    health = _compute_health(scalars, window.samples)
+    header = _header_panel(config, health, window)
 
     with Live(console=console, refresh_per_second=refresh_hz, screen=False) as live:
         live.update(
@@ -384,6 +668,8 @@ def run_dashboard(config: WonderConfig) -> None:
                 config.period_seconds,
                 last_refresh,
                 config.poll_seconds,
+                header=header,
+                scalars=scalars,
             ),
             refresh=True,
         )
@@ -396,9 +682,11 @@ def run_dashboard(config: WonderConfig) -> None:
                         distribution_id=config.distribution_id,
                         period_seconds=config.period_seconds,
                         window_minutes=config.window_minutes,
+                        scalars=scalars,
                     )
                     last_refresh = datetime.now(timezone.utc)
                 except ProfileNotFound as error:
+                    scalars.clear()
                     window = MetricWindow(
                         samples=[],
                         status="CredentialsMissing",
@@ -407,6 +695,7 @@ def run_dashboard(config: WonderConfig) -> None:
                     last_refresh = datetime.now(timezone.utc)
                     console.log(f"Profile error: {error}")
                 except NoCredentialsError as error:
+                    scalars.clear()
                     window = MetricWindow(
                         samples=[],
                         status="CredentialsMissing",
@@ -419,6 +708,7 @@ def run_dashboard(config: WonderConfig) -> None:
                     last_refresh = datetime.now(timezone.utc)
                     console.log(f"Credentials error: {error}")
                 except (ClientError, BotoCoreError) as error:
+                    scalars.clear()
                     window = MetricWindow(
                         samples=[],
                         status="CloudWatchError",
@@ -427,12 +717,17 @@ def run_dashboard(config: WonderConfig) -> None:
                     last_refresh = datetime.now(timezone.utc)
                     console.log(f"CloudWatch error: {error}")
 
+                health = _compute_health(scalars, window.samples)
+                header = _header_panel(config, health, window)
+
                 live.update(
                     build_layout(
                         window,
                         config.period_seconds,
                         last_refresh,
                         config.poll_seconds,
+                        header=header,
+                        scalars=scalars,
                     ),
                     refresh=True,
                 )
@@ -443,6 +738,8 @@ def run_dashboard(config: WonderConfig) -> None:
                     config.period_seconds,
                     last_refresh,
                     config.poll_seconds,
+                    header=header,
+                    scalars=scalars,
                 ):
                     console.print("\n[cyan]Exit requested (q).[/cyan]")
                     break
