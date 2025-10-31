@@ -16,8 +16,8 @@ def build_loading_layout(title: str, color: str = "blue") -> Layout:
     return layout
 
 
-def simple_table(headers: Iterable[str]) -> Table:
+def simple_table(headers: Iterable[str], header_style: str = "bold cyan") -> Table:
     table = Table(expand=True, row_styles=("", "dim"))
     for header in headers:
-        table.add_column(header, header_style="bold cyan", overflow="fold")
+        table.add_column(header, header_style=header_style, overflow="fold")
     return table

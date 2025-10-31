@@ -7,6 +7,8 @@ It runs entirely in your shell and uses Rich for live, animated dashboards.
 - **CloudFront dashboard** – live requests, bytes, cache hit rate, error rates, latency, health badge, and trend sparkline.
 - **S3 / EC2 / Lambda toolkits** – submenu loaders and tables for buckets, instances, and functions, ready for future actions.
 - **Settings & config viewer** – see the active WonderDash configuration right inside the hub.
+- **Identity & exports** – check the active AWS caller identity and export the latest table to CSV or clipboard.
+- **Theme toggle** – swap between “Night Drive” and “Terminal Green” palettes without leaving the terminal.
 - Designed for AWS CLI users: drop into the hub and drive everything with keypresses.
 
 ## Prerequisites
