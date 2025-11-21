@@ -32,13 +32,11 @@ Files: `config.py`, user overrides in `~/.wonderdash/config.json`
 - Provides a single import (`WonderConfig`) that other modules consume.
 
 ## Diagrams
-High-level diagrams live in `docs/assets/architecture_overview.png`. They illustrate:
+High-level diagrams live in `docs/assets/wonderdash_architecture_overview.png`. They illustrate:
 
 1. User → WonderDash → AWS SDK flow
 2. Layered architecture stack
 3. The cached in-memory model
 4. Interactive terminal mock-up
-
-Keep the diagram synced with this document whenever architecture changes.
 
 ![WonderDash Architecture Overview](assets/wonderdash_architecture_overview.png)
