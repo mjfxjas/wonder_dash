@@ -41,4 +41,4 @@ High-level diagrams live in `docs/assets/architecture_overview.png`. They illust
 
 Keep the diagram synced with this document whenever architecture changes.
 
-![WonderDash Architecture Overview](assets/architecture_overview.png)
+![WonderDash Architecture Overview](assets/wonderdash_architecture_overview.png)
