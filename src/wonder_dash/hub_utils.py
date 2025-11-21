@@ -1,3 +1,5 @@
+"""Shared Rich helpers, layout builders, and formatting utilities."""
+
 from __future__ import annotations
 
 from typing import Iterable

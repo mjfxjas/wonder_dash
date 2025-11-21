@@ -1,3 +1,5 @@
+"""Menu router and interactive export hub for WonderDash."""
+
 from __future__ import annotations
 
 import csv
