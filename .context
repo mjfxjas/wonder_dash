@@ -1,0 +1,27 @@
+WonderDash - Neon-styled AWS terminal dashboard
+
+STRUCTURE:
+- src/wonder_dash/ - Main package source
+- hub.py - Interactive menu system with AWS service toolkits
+- dashboard.py - Live CloudFront metrics dashboard  
+- config.py - Configuration management
+- cli.py - Command line interface
+- wizard.py - Setup wizard
+- hub_utils.py - Shared utilities
+
+FEATURES:
+- CloudFront live dashboard (requests, cache hit rate, errors)
+- S3/EC2/Lambda service browsers
+- Error watch via CloudWatch logs
+- CSV/clipboard export functionality
+- Dark/light theme toggle
+- AWS identity verification
+
+DEPENDENCIES:
+- boto3 - AWS SDK
+- rich - Terminal UI framework
+- Python 3.9+
+
+ENTRY POINTS:
+- wonder-dash hub - Launch interactive hub
+- python -m wonder_dash.hub - Direct module execution

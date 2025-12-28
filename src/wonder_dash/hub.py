@@ -7,7 +7,7 @@ import io
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -253,6 +253,30 @@ def _stub(feature: str) -> None:
     input("Press Enter to return.")
 
 
+def _format_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+        if size < 1024.0 or unit == "PB":
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{int(size)} B"
+
+
+def _clean_message(message: str, max_len: int = 120) -> str:
+    cleaned = " ".join(message.split())
+    if len(cleaned) > max_len:
+        return f"{cleaned[: max_len - 3]}..."
+    return cleaned
+
+
+def _format_timestamp(epoch_ms: Optional[int]) -> str:
+    if epoch_ms is None:
+        return "?"
+    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _menu(actions: Dict[int, Tuple[str, MenuHandler]]) -> None:
     console.clear()
     _print_header("Hub Console")
@@ -285,9 +309,50 @@ def _ec2_menu() -> None:
         color=_style("ec2"),
         options={
             1: ("List instances", _ec2_list_instances),
-            2: ("Instance actions (coming soon)", lambda: _stub("Instance actions")),
+            2: ("Instance actions", _ec2_instance_actions),
         },
     )
+
+
+def _ec2_instance_actions() -> None:
+    _submenu_loop(
+        title="EC2 Instance Actions",
+        color=_style("ec2"),
+        options={
+            1: ("Start instance", lambda: _ec2_action("start")),
+            2: ("Stop instance", lambda: _ec2_action("stop")),
+            3: ("Reboot instance", lambda: _ec2_action("reboot")),
+        },
+    )
+
+
+def _ec2_action(action: str) -> None:
+    console.print(f"Enter instance ID for {action}:")
+    instance_id = input().strip()
+    if not instance_id:
+        console.print("No instance ID provided.", style=_style("warning"))
+        input("Press Enter to return.")
+        return
+    
+    with Live(console=console, refresh_per_second=4, screen=False) as live:
+        layout = build_loading_layout(f"EC2 {action.title()}", _style("ec2"))
+        live.update(layout)
+        try:
+            session = _aws_session()
+            ec2 = session.client("ec2")
+            
+            if action == "start":
+                ec2.start_instances(InstanceIds=[instance_id])
+            elif action == "stop":
+                ec2.stop_instances(InstanceIds=[instance_id])
+            elif action == "reboot":
+                ec2.reboot_instances(InstanceIds=[instance_id])
+            
+            layout["body"].update(Panel(f"Instance {instance_id} {action} initiated.", border_style=_style("success")))
+        except (ClientError, BotoCoreError) as error:
+            layout["body"].update(Panel(str(error), border_style=_style("error")))
+        live.refresh()
+    input("Press Enter to return.")
 
 
 def _lambda_menu() -> None:
@@ -299,6 +364,104 @@ def _lambda_menu() -> None:
             2: ("Invocation stats (coming soon)", lambda: _stub("Invocation stats")),
         },
     )
+
+
+def _logs_snapshot() -> None:
+    prefix = input("Log group prefix (leave blank for all): ").strip()
+    max_groups = max(1, IntPrompt.ask("Max groups to list", default=20))
+    config = load_config()
+    logs = _aws_session().client("logs", region_name=config.region)
+    groups: List[Dict[str, object]] = []
+
+    error_message: Optional[str] = None
+    with Live(console=console, refresh_per_second=4, screen=False) as live:
+        layout = build_loading_layout("CloudWatch Logs", _style("accent"))
+        live.update(layout)
+        try:
+            paginator = logs.get_paginator("describe_log_groups")
+            kwargs: Dict[str, object] = {"PaginationConfig": {"MaxItems": max_groups}}
+            if prefix:
+                kwargs["logGroupNamePrefix"] = prefix
+            for page in paginator.paginate(**kwargs):
+                groups.extend(page.get("logGroups", []))
+            groups = groups[:max_groups]
+            if not groups:
+                layout["body"].update(Panel("No log groups found.", border_style=_style("warning")))
+            else:
+                table = simple_table(
+                    ["Index", "Log Group", "Retention", "Stored"],
+                    header_style=_style("accent_alt"),
+                )
+                for idx, group in enumerate(groups, start=1):
+                    name = group.get("logGroupName", "?")
+                    retention = group.get("retentionInDays")
+                    retention_label = f"{retention}d" if retention else "Never"
+                    stored = _format_bytes(int(group.get("storedBytes") or 0))
+                    table.add_row(str(idx), str(name), retention_label, stored)
+                layout["body"].update(table)
+        except (ClientError, BotoCoreError) as error:
+            error_message = str(error)
+            layout["body"].update(Panel(error_message, border_style=_style("error")))
+        live.refresh()
+
+    if error_message:
+        input("Press Enter to return.")
+        return
+
+    if not groups:
+        input("Press Enter to return.")
+        return
+
+    while True:
+        choice = IntPrompt.ask("Select log group (0 to cancel)", default=1)
+        if choice == 0:
+            return
+        if 1 <= choice <= len(groups):
+            break
+        console.print("Invalid choice.", style=_style("warning"))
+
+    group_name = str(groups[choice - 1].get("logGroupName", "?"))
+    lookback_minutes = max(1, IntPrompt.ask("Look back minutes", default=15))
+    max_events = max(1, IntPrompt.ask("Max events", default=25))
+
+    snapshot_error: Optional[str] = None
+    with Live(console=console, refresh_per_second=4, screen=False) as live:
+        layout = build_loading_layout(f"Logs Snapshot: {group_name}", _style("accent"))
+        live.update(layout)
+        try:
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(minutes=lookback_minutes)
+            response = logs.filter_log_events(
+                logGroupName=group_name,
+                startTime=int(start.timestamp() * 1000),
+                endTime=int(end.timestamp() * 1000),
+                limit=max_events,
+                interleaved=True,
+            )
+            events = response.get("events", [])
+            headers = ["Time (UTC)", "Stream", "Message"]
+            rows: List[List[str]] = []
+            table = simple_table(headers, header_style=_style("accent_alt"))
+            if events:
+                for event in events:
+                    timestamp = _format_timestamp(event.get("timestamp"))
+                    stream = str(event.get("logStreamName", "?"))
+                    message = _clean_message(str(event.get("message", "")))
+                    table.add_row(timestamp, stream, message)
+                    rows.append([timestamp, stream, message])
+            else:
+                table.add_row("No events found", "", "")
+                rows.append(["No events found", "", ""])
+            layout["body"].update(table)
+            _record_export(f"Logs Snapshot: {group_name}", headers, rows)
+        except (ClientError, BotoCoreError) as error:
+            snapshot_error = str(error)
+            layout["body"].update(Panel(snapshot_error, border_style=_style("error")))
+        live.refresh()
+    if snapshot_error:
+        input("Press Enter to return.")
+        return
+    input("Press Enter to return.")
 
 
 def _s3_list_buckets() -> None:
@@ -391,6 +554,64 @@ def _lambda_list_functions() -> None:
     input("Press Enter to return.")
 
 
+def _error_watch() -> None:
+    with Live(console=console, refresh_per_second=2, screen=False) as live:
+        layout = build_loading_layout("Error Watch", _style("error"))
+        live.update(layout)
+        try:
+            session = _aws_session()
+            logs = session.client("logs")
+            
+            # Get recent log groups
+            response = logs.describe_log_groups(limit=10)
+            log_groups = response.get("logGroups", [])
+            
+            headers = ["Log Group", "Error Count", "Latest Error"]
+            rows: List[List[str]] = []
+            table = simple_table(headers, header_style=_style("accent_alt"))
+            
+            from datetime import datetime, timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=1)
+            
+            for log_group in log_groups[:5]:  # Check top 5 groups
+                group_name = log_group.get("logGroupName", "")
+                try:
+                    # Search for ERROR patterns
+                    search_response = logs.filter_log_events(
+                        logGroupName=group_name,
+                        startTime=int(start_time.timestamp() * 1000),
+                        endTime=int(end_time.timestamp() * 1000),
+                        filterPattern="ERROR",
+                        limit=10
+                    )
+                    events = search_response.get("events", [])
+                    error_count = len(events)
+                    latest_error = events[0].get("message", "")[:50] + "..." if events else "None"
+                    
+                    style = _style("error") if error_count > 0 else _style("success")
+                    table.add_row(
+                        Text(group_name, style=style),
+                        Text(str(error_count), style=style),
+                        Text(latest_error, style="dim white")
+                    )
+                    rows.append([group_name, str(error_count), latest_error])
+                except Exception:
+                    table.add_row(group_name, "Access denied", "")
+                    rows.append([group_name, "Access denied", ""])
+            
+            if not log_groups:
+                table.add_row("No log groups found", "0", "")
+                rows.append(["No log groups found", "0", ""])
+            
+            layout["body"].update(table)
+            _record_export("Error Watch", headers, rows)
+        except (ClientError, BotoCoreError) as error:
+            layout["body"].update(Panel(str(error), border_style=_style("error")))
+        live.refresh()
+    input("Press Enter to return.")
+
+
 def _settings() -> None:
     config = load_config()
     console.print("Current configuration:")
@@ -416,8 +637,8 @@ def launch_hub() -> None:
         2: ("S3 Buckets", _s3_menu),
         3: ("EC2 Instances", _ec2_menu),
         4: ("Lambda Functions", _lambda_menu),
-        5: ("Logs Snapshot (coming soon)", lambda: _stub("Logs snapshot")),
-        6: ("Error Watch (coming soon)", lambda: _stub("Error watch")),
+        5: ("Logs Snapshot", _logs_snapshot),
+        6: ("Error Watch", _error_watch),
         7: ("Settings", _settings),
         8: ("Who am I", _who_am_i),
         9: ("Export last table", _export_menu),
