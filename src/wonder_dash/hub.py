@@ -33,6 +33,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover
     raise SystemExit(1) from exc
 
 from .hub_utils import build_loading_layout, simple_table
+from .ascii_art import get_wonder_dash_logo, get_compact_logo, get_welcome_message
 
 console = Console()
 
@@ -207,20 +208,36 @@ def _tagline() -> str:
     return TAGLINES[today % len(TAGLINES)]
 
 
-def _print_header(title: str) -> None:
-    banner = Text()
-    banner.append("╔═╡ ", style=_style("accent_alt"))
-    banner.append("WonderDash", style=f"bold {_style('accent')}")
-    banner.append(" ╞═╗", style=_style("accent_alt"))
-    subtitle = Text(_tagline(), style="dim white")
-    console.print(
-        Panel.fit(
-            Text.assemble(banner, Text("\n"), subtitle),
-            border_style=_style("header_border"),
-            title=title,
-            title_align="left",
+def _print_header(title: str, show_logo: bool = False) -> None:
+    if show_logo:
+        # Show full ASCII art logo for main menu
+        try:
+            logo = get_wonder_dash_logo()
+            console.print(logo)
+            console.print()
+            welcome = get_welcome_message()
+            console.print(welcome, justify="center")
+            console.print()
+        except Exception:
+            # Fallback to compact logo if full logo fails
+            logo = get_compact_logo()
+            console.print(logo)
+            console.print()
+    else:
+        # Original compact header for submenus
+        banner = Text()
+        banner.append("╔═╡ ", style=_style("accent_alt"))
+        banner.append("WonderDash", style=f"bold {_style('accent')}")
+        banner.append(" ╞═╗", style=_style("accent_alt"))
+        subtitle = Text(_tagline(), style="dim white")
+        console.print(
+            Panel.fit(
+                Text.assemble(banner, Text("\n"), subtitle),
+                border_style=_style("header_border"),
+                title=title,
+                title_align="left",
+            )
         )
-    )
 
 
 def _submenu_loop(title: str, color: str, options: Dict[int, Tuple[str, MenuHandler]]) -> None:
@@ -274,12 +291,13 @@ def _clean_message(message: str, max_len: int = 120) -> str:
 def _format_timestamp(epoch_ms: Optional[int]) -> str:
     if epoch_ms is None:
         return "?"
+    from datetime import timezone
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _menu(actions: Dict[int, Tuple[str, MenuHandler]]) -> None:
     console.clear()
-    _print_header("Hub Console")
+    _print_header("Hub Console", show_logo=True)
 
     accent = _style("accent")
     accent_alt = _style("accent_alt")
@@ -429,7 +447,9 @@ def _logs_snapshot() -> None:
         layout = build_loading_layout(f"Logs Snapshot: {group_name}", _style("accent"))
         live.update(layout)
         try:
-            end = datetime.now(timezone.utc)
+            end = datetime.now()
+            from datetime import timezone
+            end = end.replace(tzinfo=timezone.utc)
             start = end - timedelta(minutes=lookback_minutes)
             response = logs.filter_log_events(
                 logGroupName=group_name,
@@ -756,52 +776,10 @@ def _launch_cloudfront() -> None:
     run_dashboard(config)
 
 
-def _display_intro_graphic() -> None:
-    """Displays the intro graphic."""
-    wonder_art = [
-        "[bold magenta]",
-        "██╗    ██╗ ██████╗ ███╗   ██╗██████╗  ███████╗██████╗",
-        "██║    ██║██╔═══██╗████╗  ██║██╔══██╗██╔════╝██╔══██╗",
-        "██║ █╗ ██║██║   ██║██╔██╗ ██║██║  ██║█████╗  ██████╔╝",
-        "██║███╗██║██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██╔══██╗",
-        "╚███╔███╔╝╚██████╔╝██║ ╚████║██████╔╝███████╗██║  ██║",
-        " ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═╝",
-        "[/bold magenta]",
-    ]
-
-    dash_art = [
-        "[bold magenta]",
-        "██████╗  █████╗ ███████╗██╗  ██╗",
-        "██╔══██╗██╔══██╗██╔════╝██║  ██║",
-        "██║  ██║███████║███████╗███████║",
-        "██║  ██║██╔══██║╚════██║██╔══██║",
-        "██████╔╝██║  ██║███████║██║  ██║",
-        "╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝",
-        "[/bold magenta]",
-    ]
-
-    wonder_dash_art = "\n".join(wonder_art) + "\n\n" + "\n".join(dash_art)
-    tagline = "[bright_cyan]Telemetry tuned to the neon hum.[/bright_cyan]"
-    content = Text.from_markup(wonder_dash_art, justify="center")
-    content.append("\n\n")
-    content.append(Text.from_markup(tagline, justify="center"))
-    panel = Panel(
-        content,
-        border_style="cyan",
-        title="[bold white]WonderDash[/bold white]",
-        title_align="center",
-        padding=(2, 4),
-    )
-    console.print(panel)
-    input("Press Enter to continue...")
-
-
 def launch_hub() -> None:
     if not sys.stdin.isatty():
         print("WonderDash hub needs an interactive terminal. Run this from a shell.")
         return
-
-    _display_intro_graphic()
 
     actions: Dict[int, Tuple[str, MenuHandler]] = {
         1: ("CloudFront Traffic", _launch_cloudfront),
