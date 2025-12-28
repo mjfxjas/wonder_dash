@@ -5,15 +5,19 @@ It runs entirely in your shell and uses Rich for live, animated dashboards.
 
 ## Features
 - **CloudFront dashboard** – live requests, bytes, cache hit rate, error rates, latency, health badge, and trend sparkline.
-- **S3 / EC2 / Lambda toolkits** – submenu loaders and tables for buckets, instances, and functions, ready for future actions.
+- **S3 toolkit** – bucket listing and analytics with object counts, storage sizes, and regions.
+- **EC2 toolkit** – instance listing and management actions (start, stop, reboot).
+- **Lambda toolkit** – function listing and invocation statistics with error rates and duration metrics.
+- **Logs snapshot** – CloudWatch logs browser with filtering and event viewing.
+- **Error watch** – real-time monitoring of ERROR patterns across log groups.
 - **Settings & config viewer** – see the active WonderDash configuration right inside the hub.
 - **Identity & exports** – check the active AWS caller identity and export the latest table to CSV or clipboard.
-- **Theme toggle** – swap between “Night Drive” and “Terminal Green” palettes without leaving the terminal.
+- **Theme toggle** – swap between "Night Drive" and "Terminal Green" palettes without leaving the terminal.
 - Designed for AWS CLI users: drop into the hub and drive everything with keypresses.
 
 ## Prerequisites
 - Python 3.9+
-- AWS credentials (CLI profile or environment vars) with permission to call CloudFront, S3, EC2, and Lambda.
+- AWS credentials (CLI profile or environment vars) with permission to call CloudFront, S3, EC2, Lambda, and CloudWatch.
 
 ## Install & Run
 ```bash

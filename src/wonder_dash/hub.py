@@ -7,7 +7,7 @@ import io
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -298,7 +298,7 @@ def _s3_menu() -> None:
         color=_style("s3"),
         options={
             1: ("List buckets", _s3_list_buckets),
-            2: ("Bucket analytics (coming soon)", lambda: _stub("Bucket analytics")),
+            2: ("Bucket analytics", _s3_bucket_analytics),
         },
     )
 
@@ -361,7 +361,7 @@ def _lambda_menu() -> None:
         color=_style("lambda"),
         options={
             1: ("List functions", _lambda_list_functions),
-            2: ("Invocation stats (coming soon)", lambda: _stub("Invocation stats")),
+            2: ("Invocation stats", _lambda_invocation_stats),
         },
     )
 
@@ -461,6 +461,135 @@ def _logs_snapshot() -> None:
     if snapshot_error:
         input("Press Enter to return.")
         return
+    input("Press Enter to return.")
+
+
+def _lambda_invocation_stats() -> None:
+    with Live(console=console, refresh_per_second=4, screen=False) as live:
+        layout = build_loading_layout("Lambda Invocation Stats", _style("lambda"))
+        live.update(layout)
+        try:
+            session = _aws_session()
+            cloudwatch = session.client("cloudwatch")
+            aws_lambda = session.client("lambda")
+            
+            # Get functions first
+            functions_response = aws_lambda.list_functions(MaxItems=10)
+            functions = functions_response.get("Functions", [])
+            
+            headers = ["Function", "Invocations", "Errors", "Duration (ms)"]
+            rows: List[List[str]] = []
+            table = simple_table(headers, header_style=_style("accent_alt"))
+            
+            from datetime import datetime, timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=24)
+            
+            for function in functions:
+                name = function.get("FunctionName")
+                try:
+                    # Get invocation count
+                    inv_response = cloudwatch.get_metric_statistics(
+                        Namespace="AWS/Lambda",
+                        MetricName="Invocations",
+                        Dimensions=[{"Name": "FunctionName", "Value": name}],
+                        StartTime=start_time,
+                        EndTime=end_time,
+                        Period=86400,
+                        Statistics=["Sum"]
+                    )
+                    invocations = int(inv_response["Datapoints"][0]["Sum"]) if inv_response["Datapoints"] else 0
+                    
+                    # Get error count
+                    err_response = cloudwatch.get_metric_statistics(
+                        Namespace="AWS/Lambda",
+                        MetricName="Errors",
+                        Dimensions=[{"Name": "FunctionName", "Value": name}],
+                        StartTime=start_time,
+                        EndTime=end_time,
+                        Period=86400,
+                        Statistics=["Sum"]
+                    )
+                    errors = int(err_response["Datapoints"][0]["Sum"]) if err_response["Datapoints"] else 0
+                    
+                    # Get average duration
+                    dur_response = cloudwatch.get_metric_statistics(
+                        Namespace="AWS/Lambda",
+                        MetricName="Duration",
+                        Dimensions=[{"Name": "FunctionName", "Value": name}],
+                        StartTime=start_time,
+                        EndTime=end_time,
+                        Period=86400,
+                        Statistics=["Average"]
+                    )
+                    duration = int(dur_response["Datapoints"][0]["Average"]) if dur_response["Datapoints"] else 0
+                    
+                    table.add_row(name, str(invocations), str(errors), str(duration))
+                    rows.append([name, str(invocations), str(errors), str(duration)])
+                except Exception:
+                    table.add_row(name, "N/A", "N/A", "N/A")
+                    rows.append([name, "N/A", "N/A", "N/A"])
+            
+            if not functions:
+                table.add_row("No functions found", "0", "0", "0")
+                rows.append(["No functions found", "0", "0", "0"])
+            
+            layout["body"].update(table)
+            _record_export("Lambda Invocation Stats", headers, rows)
+        except (ClientError, BotoCoreError) as error:
+            layout["body"].update(Panel(str(error), border_style=_style("error")))
+        live.refresh()
+    input("Press Enter to return.")
+
+
+def _s3_bucket_analytics() -> None:
+    with Live(console=console, refresh_per_second=4, screen=False) as live:
+        layout = build_loading_layout("S3 Bucket Analytics", _style("s3"))
+        live.update(layout)
+        try:
+            session = _aws_session()
+            s3 = session.client("s3")
+            
+            response = s3.list_buckets()
+            buckets = response.get("Buckets", [])
+            
+            headers = ["Bucket", "Objects", "Size (MB)", "Region"]
+            rows: List[List[str]] = []
+            table = simple_table(headers, header_style=_style("accent_alt"))
+            
+            for bucket in buckets[:10]:  # Limit to 10 buckets
+                name = bucket.get("Name", "")
+                try:
+                    # Get bucket location
+                    location = s3.get_bucket_location(Bucket=name)
+                    region = location.get("LocationConstraint") or "us-east-1"
+                    
+                    # Get object count and size
+                    objects_response = s3.list_objects_v2(Bucket=name, MaxKeys=1000)
+                    objects = objects_response.get("KeyCount", 0)
+                    
+                    # Calculate total size
+                    total_size = 0
+                    if "Contents" in objects_response:
+                        total_size = sum(obj.get("Size", 0) for obj in objects_response["Contents"])
+                    
+                    size_mb = round(total_size / 1024 / 1024, 2)
+                    
+                    table.add_row(name, str(objects), str(size_mb), region)
+                    rows.append([name, str(objects), str(size_mb), region])
+                except Exception as e:
+                    table.add_row(name, "Access denied", "N/A", "N/A")
+                    rows.append([name, "Access denied", "N/A", "N/A"])
+            
+            if not buckets:
+                table.add_row("No buckets found", "0", "0", "N/A")
+                rows.append(["No buckets found", "0", "0", "N/A"])
+            
+            layout["body"].update(table)
+            _record_export("S3 Bucket Analytics", headers, rows)
+        except (ClientError, BotoCoreError) as error:
+            layout["body"].update(Panel(str(error), border_style=_style("error")))
+        live.refresh()
     input("Press Enter to return.")
 
 
@@ -627,10 +756,52 @@ def _launch_cloudfront() -> None:
     run_dashboard(config)
 
 
+def _display_intro_graphic() -> None:
+    """Displays the intro graphic."""
+    wonder_art = [
+        "[bold magenta]",
+        "██╗    ██╗ ██████╗ ███╗   ██╗██████╗  ███████╗██████╗",
+        "██║    ██║██╔═══██╗████╗  ██║██╔══██╗██╔════╝██╔══██╗",
+        "██║ █╗ ██║██║   ██║██╔██╗ ██║██║  ██║█████╗  ██████╔╝",
+        "██║███╗██║██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██╔══██╗",
+        "╚███╔███╔╝╚██████╔╝██║ ╚████║██████╔╝███████╗██║  ██║",
+        " ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═╝",
+        "[/bold magenta]",
+    ]
+
+    dash_art = [
+        "[bold magenta]",
+        "██████╗  █████╗ ███████╗██╗  ██╗",
+        "██╔══██╗██╔══██╗██╔════╝██║  ██║",
+        "██║  ██║███████║███████╗███████║",
+        "██║  ██║██╔══██║╚════██║██╔══██║",
+        "██████╔╝██║  ██║███████║██║  ██║",
+        "╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝",
+        "[/bold magenta]",
+    ]
+
+    wonder_dash_art = "\n".join(wonder_art) + "\n\n" + "\n".join(dash_art)
+    tagline = "[bright_cyan]Telemetry tuned to the neon hum.[/bright_cyan]"
+    content = Text.from_markup(wonder_dash_art, justify="center")
+    content.append("\n\n")
+    content.append(Text.from_markup(tagline, justify="center"))
+    panel = Panel(
+        content,
+        border_style="cyan",
+        title="[bold white]WonderDash[/bold white]",
+        title_align="center",
+        padding=(2, 4),
+    )
+    console.print(panel)
+    input("Press Enter to continue...")
+
+
 def launch_hub() -> None:
     if not sys.stdin.isatty():
         print("WonderDash hub needs an interactive terminal. Run this from a shell.")
         return
+
+    _display_intro_graphic()
 
     actions: Dict[int, Tuple[str, MenuHandler]] = {
         1: ("CloudFront Traffic", _launch_cloudfront),
