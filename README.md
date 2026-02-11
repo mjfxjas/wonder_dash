@@ -1,5 +1,8 @@
 # WonderDash
 
+[![CI](https://github.com/mjfxjas/wonder_dash/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mjfxjas/wonder_dash/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/wonder-dash.svg)](https://pypi.org/project/wonder-dash/)
+
 WonderDash is a neon-styled terminal console for AWS CloudFront and core services.  
 It runs entirely in your shell and uses Rich for live, animated dashboards.
 
@@ -22,7 +25,7 @@ It runs entirely in your shell and uses Rich for live, animated dashboards.
 ## Install & Run
 ```bash
 git clone https://github.com/mjfxjas/wonder_dash.git
-cd wonder_dash_repo
+cd wonder_dash
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -34,10 +37,22 @@ wonder-dash hub
 That launches the hub menu; choose `1` for the CloudFront dashboard or explore the AWS toolkits.  
 Prefer running directly? Use `python -m wonder_dash.hub`.
 
+## Smoke Test
+Quick verification that install and CLI wiring are healthy:
+
+```bash
+python3 -m pip install --upgrade wonder-dash
+wonder-dash --help
+python3 -c "import wonder_dash; print(wonder_dash.__version__)"
+```
+
 ## Development Notes
 - The package follows a `src/` layout; after editing run `pip install -e .` to reload changes.
 - Requires `rich` and `boto3` (pulled in automatically by `pip install .`).
 - WonderDash reads `~/.aws/credentials` by default; set `CF_DISTRIBUTION_ID`, `CF_PERIOD_SECONDS`, etc., for overrides.
 
+## Changelog
+See `CHANGELOG.md` for versioned release notes.
+
 ## License
-MIT License © 2025 Jonathan Schimpf
+MIT. See `LICENSE`.
