@@ -1,7 +1,7 @@
 
 [project]
 name = "wonder-dash"
-version = "0.1.0"
+version = "0.1.1"
 description = "Terminal dashboard for AWS CloudFront and core services monitoring"
 authors = [{name = "Jonathan Schimpf", email = "jon@theatrico.org"}]
 readme = "README.md"
