@@ -46,6 +46,14 @@ wonder-dash --help
 python3 -c "import wonder_dash; print(wonder_dash.__version__)"
 ```
 
+## Security Checks
+- CI runs Bandit static security analysis on `src/wonder_dash` (Python 3.11 job).
+- Failing threshold is set to medium-or-higher severity/confidence.
+
+```bash
+bandit -r src/wonder_dash --severity-level medium --confidence-level medium
+```
+
 ## Development Notes
 - The package follows a `src/` layout; after editing run `pip install -e .` to reload changes.
 - Requires `rich` and `boto3` (pulled in automatically by `pip install .`).
