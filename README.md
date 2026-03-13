@@ -37,6 +37,21 @@ wonder-dash hub
 That launches the hub menu; choose `1` for the CloudFront dashboard or explore the AWS toolkits.  
 Prefer running directly? Use `python -m wonder_dash.hub`.
 
+## Quick PyPI Install
+If you just want the published package:
+
+```bash
+python3 -m pip install --upgrade wonder-dash
+wonder-dash hub
+```
+
+## Best Demo Paths
+Good first things to show in the terminal:
+- `wonder-dash hub` → main launcher
+- CloudFront dashboard → requests, bytes, cache hit rate, latency
+- S3 toolkit → bucket inventory and storage analytics
+- Lambda toolkit → function inventory and health signals
+
 ## Smoke Test
 Quick verification that install and CLI wiring are healthy:
 
