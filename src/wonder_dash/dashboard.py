@@ -639,6 +639,8 @@ def _wait_for_next_poll(
 
 
 def run_dashboard(config: WonderConfig) -> None:
+    config = _inject_overrides(config)
+    config.ensure_valid()
     if not config.distribution_id:
         console.print(
             "[red]No CloudFront distribution configured.[/red] "
@@ -646,7 +648,6 @@ def run_dashboard(config: WonderConfig) -> None:
         )
         raise SystemExit(1)
 
-    config = _inject_overrides(config)
     client = _cloudwatch_client(config)
     refresh_hz = max(1, min(10, 60 // max(1, config.poll_seconds // 2)))
 
