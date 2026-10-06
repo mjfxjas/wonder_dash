@@ -232,7 +232,16 @@ def fetch_request_series(
             )
             for field in ("Timestamps", "Values", "Messages"):
                 merged[field].extend(result.get(field) or [])
-            merged["StatusCode"] = result.get("StatusCode", merged.get("StatusCode", "Unknown"))
+            previous_status = merged.get("StatusCode", "Unknown")
+            next_status = result.get("StatusCode", previous_status)
+            # PartialData normally resolves after pagination; actual failures must remain visible.
+            failures = {"InternalError": 1, "Forbidden": 2}
+            if previous_status in failures or next_status in failures:
+                merged["StatusCode"] = max(
+                    (previous_status, next_status), key=lambda status: failures.get(status, 0)
+                )
+            else:
+                merged["StatusCode"] = next_status
         token = response.get("NextToken")
         if not token:
             break

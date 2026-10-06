@@ -43,6 +43,22 @@ class MetricPaginationTests(unittest.TestCase):
         self.assertEqual(window.status, "Forbidden")
         self.assertEqual(window.messages, ["Denied: no access"])
 
+    def test_metric_failure_is_not_hidden_by_complete_on_later_page(self):
+        for failed_status in ("InternalError", "Forbidden"):
+            with self.subTest(status=failed_status):
+                client = Mock()
+                client.get_metric_data.side_effect = [
+                    {"NextToken": "next-page", "MetricDataResults": [
+                        {"Id": "requests", "StatusCode": failed_status,
+                         "Messages": [{"Code": failed_status, "Value": "first-page failure"}]},
+                    ]},
+                    {"MetricDataResults": [{"Id": "requests", "StatusCode": "Complete"}]},
+                ]
+                window = fetch_request_series(client, "EXAMPLE", 60, 120)
+                self.assertEqual(window.status, failed_status)
+                self.assertEqual(window.messages, [f"{failed_status}: first-page failure"])
+                self.assertEqual(client.get_metric_data.call_count, 2)
+
     def test_empty_response_clears_previous_scalars(self):
         client = Mock()
         client.get_metric_data.return_value = {}
