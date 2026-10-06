@@ -215,15 +215,30 @@ def fetch_request_series(
             }
         )
 
-    response = client.get_metric_data(
+    request = dict(
         MetricDataQueries=queries,
         StartTime=start,
         EndTime=end,
         ScanBy="TimestampAscending",
         MaxDatapoints=1000,
     )
+    merged_results = {}
+    while True:
+        response = client.get_metric_data(**request)
+        for result in response.get("MetricDataResults", []):
+            metric_id = result.get("Id", "")
+            merged = merged_results.setdefault(
+                metric_id, {"Id": metric_id, "Timestamps": [], "Values": [], "Messages": []}
+            )
+            for field in ("Timestamps", "Values", "Messages"):
+                merged[field].extend(result.get(field) or [])
+            merged["StatusCode"] = result.get("StatusCode", merged.get("StatusCode", "Unknown"))
+        token = response.get("NextToken")
+        if not token:
+            break
+        request["NextToken"] = token
 
-    results = response.get("MetricDataResults", [])
+    results = list(merged_results.values())
     if not results:
         if scalars is not None:
             scalars.clear()
@@ -231,7 +246,7 @@ def fetch_request_series(
 
     samples: List[MetricSample] = []
     scalar_store: Dict[str, ScalarMetric] = {}
-    status = "Unknown"
+    statuses = []
     messages: List[str] = []
 
     for result in results:
@@ -241,7 +256,10 @@ def fetch_request_series(
             for ts in result.get("Timestamps", [])
         ]
         values = [float(v) for v in result.get("Values", [])]
-        status = result.get("StatusCode", status)
+        pairs = sorted(zip(timestamps, values), key=lambda pair: pair[0])
+        timestamps = [pair[0] for pair in pairs]
+        values = [pair[1] for pair in pairs]
+        statuses.append(result.get("StatusCode", "Unknown"))
 
         for entry in result.get("Messages") or []:
             if isinstance(entry, dict):
@@ -267,6 +285,9 @@ def fetch_request_series(
     if scalars is not None:
         scalars.clear()
         scalars.update(scalar_store)
+    # One healthy metric must not hide another metric's incomplete/error status.
+    severity = {"Complete": 0, "Unknown": 1, "PartialData": 2, "InternalError": 3, "Forbidden": 4}
+    status = max(statuses, key=lambda value: severity.get(value, 1))
     return MetricWindow(samples=samples, status=status, messages=messages)
 
 
