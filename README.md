@@ -3,8 +3,7 @@
 [![CI](https://github.com/mjfxjas/wonder_dash/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mjfxjas/wonder_dash/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/wonder-dash.svg)](https://pypi.org/project/wonder-dash/)
 
-WonderDash is a neon-styled terminal console for AWS CloudFront and core services.  
-It runs entirely in your shell and uses Rich for live, animated dashboards.
+Terminal console for AWS CloudFront, S3, EC2, Lambda, and CloudWatch. Uses Rich to display metrics, resource lists, and logs.
 
 ## Features
 - **CloudFront dashboard** – live requests, bytes, cache hit rate, error rates, latency, health badge, and trend sparkline.
@@ -16,7 +15,6 @@ It runs entirely in your shell and uses Rich for live, animated dashboards.
 - **Settings & config viewer** – see the active WonderDash configuration right inside the hub.
 - **Identity & exports** – check the active AWS caller identity and export the latest table to CSV or clipboard.
 - **Theme toggle** – swap between "Night Drive" and "Terminal Green" palettes without leaving the terminal.
-- Designed for AWS CLI users: drop into the hub and drive everything with keypresses.
 
 ## Prerequisites
 - Python 3.9+
@@ -34,8 +32,7 @@ pip install .
 wonder-dash hub
 ```
 
-That launches the hub menu; choose `1` for the CloudFront dashboard or explore the AWS toolkits.  
-Prefer running directly? Use `python -m wonder_dash.hub`.
+Choose `1` in the hub for the CloudFront dashboard. The hub also runs with `python -m wonder_dash.hub`.
 
 ## Quick PyPI Install
 If you just want the published package:
@@ -45,15 +42,8 @@ python3 -m pip install --upgrade wonder-dash
 wonder-dash hub
 ```
 
-## Best Demo Paths
-Good first things to show in the terminal:
-- `wonder-dash hub` → main launcher
-- CloudFront dashboard → requests, bytes, cache hit rate, latency
-- S3 toolkit → bucket inventory and storage analytics
-- Lambda toolkit → function inventory and health signals
-
 ## Smoke Test
-Quick verification that install and CLI wiring are healthy:
+Verify the installed package and CLI:
 
 ```bash
 python3 -m pip install --upgrade wonder-dash
