@@ -73,6 +73,7 @@ bandit -r src/wonder_dash --severity-level medium --confidence-level medium
 - The package follows a `src/` layout; after editing run `pip install -e .` to reload changes.
 - Requires `rich` and `boto3` (pulled in automatically by `pip install .`).
 - WonderDash reads `~/.aws/credentials` by default; set `CF_DISTRIBUTION_ID`, `CF_PERIOD_SECONDS`, etc., for overrides.
+- Run offline regression tests after installing the package: `python -m unittest discover -s tests -v`.
 
 ## Changelog
 See `CHANGELOG.md` for versioned release notes.
