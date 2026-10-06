@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+from . import __version__
 from .config import WonderConfig, config_path, load_config, save_config
 
 
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="wonder-dash",
         description="WonderDash – CloudFront request dashboard and setup assistant.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.set_defaults(func=None)
 
     subparsers = parser.add_subparsers(dest="command")

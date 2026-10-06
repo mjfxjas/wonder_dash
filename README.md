@@ -23,42 +23,50 @@ It runs entirely in your shell and uses Rich for live, animated dashboards.
 - AWS credentials (CLI profile or environment vars) with permission to call CloudFront, S3, EC2, Lambda, and CloudWatch.
 
 ## Install & Run
+
+Install from the shared [Homebrew tap](https://github.com/mjfxjas/homebrew-tap):
+
+```bash
+brew install mjfxjas/tap/wonder-dash
+wonder-dash setup
+wonder-dash hub
+```
+
+Homebrew manages Python and all dependencies, including AWS CRT. No virtual
+environment activation is needed. AWS credentials and the appropriate IAM
+permissions are still required.
+
+For a Python CLI installation, pipx also manages the environment:
+
+```bash
+pipx install wonder-dash
+wonder-dash hub
+```
+
+Version 0.1.4+ includes support for credentials created by `aws login`.
+Upgrade with `brew upgrade mjfxjas/tap/wonder-dash` or `pipx upgrade wonder-dash`.
+
+For development from source:
+
 ```bash
 git clone https://github.com/mjfxjas/wonder_dash.git
 cd wonder_dash
-
 python3 -m venv .venv
 source .venv/bin/activate
-
-pip install .
+python -m pip install -e .
+python -m unittest discover -s tests -v
 wonder-dash hub
 ```
 
-That launches the hub menu; choose `1` for the CloudFront dashboard or explore the AWS toolkits.  
-Prefer running directly? Use `python -m wonder_dash.hub`.
-
-## Quick PyPI Install
-If you just want the published package:
-
-```bash
-python3 -m pip install --upgrade wonder-dash
-wonder-dash hub
-```
-
-## Best Demo Paths
-Good first things to show in the terminal:
-- `wonder-dash hub` → main launcher
-- CloudFront dashboard → requests, bytes, cache hit rate, latency
-- S3 toolkit → bucket inventory and storage analytics
-- Lambda toolkit → function inventory and health signals
+Choose `1` in the hub for the CloudFront dashboard. The hub also runs with
+`python -m wonder_dash.hub`.
 
 ## Smoke Test
 Quick verification that install and CLI wiring are healthy:
 
 ```bash
-python3 -m pip install --upgrade wonder-dash
 wonder-dash --help
-python3 -c "import wonder_dash; print(wonder_dash.__version__)"
+wonder-dash --version
 ```
 
 ## Security Checks
